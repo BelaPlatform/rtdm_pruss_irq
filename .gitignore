@@ -1,0 +1,10 @@
+.*.sw?
+*.ko
+*.cmd
+*.mod.c
+*.o
+modules.order
+.tmp_versions/
+Module.symvers
+*_bin.h
+rtdm_pruss_irq-test
