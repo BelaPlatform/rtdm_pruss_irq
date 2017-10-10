@@ -7,7 +7,8 @@ $(error Please add <xenomai-install-path>/bin to your PATH variable)
 endif
 CC=gcc -no-pie -fno-pie
 PWD:= $(shell pwd)
-KDIR := /lib/modules/$(shell uname -r)/build
+UNAME := $(shell uname -r)
+KDIR := /lib/modules/$(UNAME)/build
 
 STD_CFLAGS  := $(shell $(XENO_CONFIG) --skin=$(XENOMAI_SKIN) --skin=rtdm --cflags) -I. -g -DXENOMAI_SKIN_$(XENOMAI_SKIN)
 STD_LDFLAGS := $(shell $(XENO_CONFIG) --skin=$(XENOMAI_SKIN) --skin=rtdm --ldflags) -g 
@@ -29,7 +30,7 @@ $(TEST): $(TEST).c $(TEST)_bin.h
 
 install:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
-	depmod -a
+	depmod -a $(UNAME)
 
 clean:
 	rm -f *~ Module.markers Module.symvers modules.order
