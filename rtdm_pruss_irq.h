@@ -23,7 +23,7 @@ struct rtdm_pruss_irq_registration {
 	 */
 	__u32 pru_intc_channel;
 	/**
-	 * valid range: 2:9 (TRM 4.4.2.1).
+	 * valid range: 0:9 (TRM 4.4.2.1).
 	 * Only 2:9 can be exported to ARM
 	 * (mapped to IRQ 20:27 (TRM 6.3))
 	 */
