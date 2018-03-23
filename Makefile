@@ -19,14 +19,14 @@ MODULE_NAME=rtdm_pruss_irq
 TEST=$(MODULE_NAME)-test
 obj-m := $(MODULE_NAME).o 
 
-all: $(MODULE_NAME).ko $(TEST)
+all: $(MODULE_NAME).ko
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules Q=
 
 $(MODULE_NAME).ko: $(MODULE_NAME).c
 
 test: $(TEST)
 $(TEST): $(TEST).c $(TEST)_bin.h
-	$(CC) -o $@ $< $(STD_CFLAGS) $(STD_LDFLAGS) -I/root/Bela/include /root/Bela/lib/libprussdrv.a
+	$(CC) -o $@ $< $(STD_CFLAGS) $(STD_LDFLAGS) -lprussdrv
 
 install:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
