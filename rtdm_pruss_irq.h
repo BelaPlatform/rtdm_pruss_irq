@@ -15,9 +15,13 @@
 #define RTDM_PRUSS_IRQ_IOC_MAGIC 'p'
 struct rtdm_pruss_irq_registration {
 	/**
-	 * valid range: 0:63 (TRM table 4-22)
+	 * A pointer to an array of pru system_events
+	 * For each element, valid range: 0:63 (TRM table 4-22)
 	 */
 	const __u8* pru_system_events;
+	/**
+	 * How many elements in the pru_system_events array
+	 */
 	__u8 pru_system_events_count;
 	/**
 	 * valid range: 0:9 (TRM 4.4.2.3.4)
