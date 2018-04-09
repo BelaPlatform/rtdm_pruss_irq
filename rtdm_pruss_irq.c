@@ -9,8 +9,8 @@ MODULE_LICENSE("GPL");
 // this is Host 4 in the PRU intc, which maps to EVTOUT2
 #define irq_number 23
 
-#define PRU_SYSTEM_EVENT 21 // done
-#define PRU_INTC_CHANNEL 5 // done
+#define PRU_SYSTEM_EVENT 21
+#define PRU_INTC_CHANNEL 5
 #define PRU_INTC_HOST PRU_INTC_CHANNEL
 
 u32 PRU_INTC_HMR_REGS[] = {
@@ -64,23 +64,30 @@ struct rtdm_pruss_irq_context {
 	rtdm_event_t event;
 	nanosecs_abs_t irq_start;
 	nanosecs_abs_t irq_stop;
+	u32 pru_system_event;
+	u32 pru_intc_channel;
+	u32 pru_intc_host;
 };
 
 static int irq_handler(rtdm_irq_t *irq_handle){
 	struct rtdm_pruss_irq_context *ctx;
 	int status;
-	u32 pru_system_event = PRU_SYSTEM_EVENT;
-	u32 pru_intc_secr_reg = PRU_INTC_SECR0_REG;
+	u32 pru_system_event;
+	u32 pru_system_event_bit;
+	u32 pru_intc_secr_reg;
 
  	ctx = ((struct rtdm_pruss_irq_context*)irq_handle->cookie);
+	pru_system_event = ctx->pru_system_event;
+	pru_intc_secr_reg = pru_system_event < 32 ? PRU_INTC_SECR0_REG : PRU_INTC_SECR1_REG;
+	pru_system_event_bit = pru_system_event & 31;
 	// 4.4.2.3.6 Interrupt status clearing
 	// check the pending enabled status (is it enabled AND has it been triggered?)
-	status = ioread32(ctx->pruintc_io + pru_intc_secr_reg) & (1 << pru_system_event);
+	status = ioread32(ctx->pruintc_io + pru_intc_secr_reg) & (1 << pru_system_event_bit);
 	if(status)
 	{
 		rtdm_event_signal(&ctx->event);
 		// clear the event
-		iowrite32((1 << pru_system_event), ctx->pruintc_io + pru_intc_secr_reg);
+		iowrite32((1 << pru_system_event_bit), ctx->pruintc_io + pru_intc_secr_reg);
 		return RTDM_IRQ_HANDLED;
 	} else {
 		return RTDM_IRQ_NONE;
@@ -89,9 +96,9 @@ static int irq_handler(rtdm_irq_t *irq_handle){
 
 void init_pru(struct rtdm_pruss_irq_context *ctx){
 	unsigned int value;
-	unsigned int pru_intc_channel = PRU_INTC_CHANNEL;
-	unsigned int pru_intc_host = PRU_INTC_HOST;
-	unsigned int pru_system_event = PRU_SYSTEM_EVENT;
+	u32 pru_intc_channel = ctx->pru_intc_channel;
+	u32 pru_intc_host = ctx->pru_intc_channel;
+	u32 pru_system_event = ctx->pru_system_event;
 	ctx->pruintc_io = ioremap(AM33XX_INTC_PHYS_BASE, PRU_INTC_SIZE);
 	// Set polarity of system events
 	iowrite32(0xFFFFFFFF, ctx->pruintc_io + PRU_INTC_SIPR0_REG);
@@ -121,7 +128,7 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	iowrite32(0xFFFFFFF, ctx->pruintc_io + PRU_INTC_SECR1_REG);
 	
 	//enable host interrupt
-	//iowrite32((1 << PRU_INTC_HOST), ctx->pruintc_io + PRU_INTC_HIER_REG);
+	//iowrite32((1 << pru_intc_host), ctx->pruintc_io + PRU_INTC_HIER_REG);
 	//value = ioread32(ctx->pruintc_io + PRU_INTC_HIER_REG);
 	//printk(KERN_WARNING "PRU_INTC_HIER_REG: %#x\n", value);
 
@@ -154,8 +161,13 @@ void init_intc(struct rtdm_pruss_irq_context *ctx){
 
 static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
+	static int called = 0;
+	ctx->pru_system_event = PRU_SYSTEM_EVENT + called;
+	ctx->pru_intc_channel = PRU_INTC_CHANNEL + called;
+	ctx->pru_intc_host = PRU_INTC_HOST + called;
+	called++;
 	
-	printk(KERN_WARNING "rtdm_pruss_irq_open\n");
+	printk(KERN_WARNING "rtdm_pruss_irq_open %d\n", called);
 
 	init_intc(ctx);
 	init_pru(ctx);
