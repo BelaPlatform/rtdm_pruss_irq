@@ -7,10 +7,10 @@ MODULE_LICENSE("GPL");
 
 // ARM interrupt number for PRU event EVTOUT2
 // this is Host 4 in the PRU intc, which maps to EVTOUT2
-#define irq_number 22
+#define irq_number 23
 
-#define PRU_SYSTEM_EVENT 20
-#define PRU_INTC_CHANNEL 4
+#define PRU_SYSTEM_EVENT 21 // done
+#define PRU_INTC_CHANNEL 5 // done
 #define PRU_INTC_HOST PRU_INTC_CHANNEL
 
 #define PRU_INTC_HMR1_REG    0x804 // this is PRU_INTC_HMR2_REG in __prussdrv.h
@@ -81,11 +81,11 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	// 4.4.2.5 INTC Basic Programming Model
 	// map system event 20 to interrupt controller channel 4
 	// we are using CMR5 because that is system event 20
-	iowrite32(PRU_INTC_CHANNEL, ctx->pruintc_io + PRU_INTC_CMR5_REG);
+	iowrite8(PRU_INTC_CHANNEL, ctx->pruintc_io + PRU_INTC_CMR5_REG + 1);
 
 	// map PRU channel interrupt to host 
 	// TODO: possible conflict
-	iowrite32(PRU_INTC_HOST, ctx->pruintc_io + PRU_INTC_HMR1_REG); //TODO: write only 8 bits
+	iowrite8(PRU_INTC_HOST, ctx->pruintc_io + PRU_INTC_HMR1_REG + 1); //TODO: write only 8 bits
 
 	//clear system events
 	iowrite32(0xFFFFFFFF, ctx->pruintc_io + PRU_INTC_SECR1_REG);
