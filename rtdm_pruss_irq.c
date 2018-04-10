@@ -7,7 +7,7 @@ MODULE_LICENSE("GPL");
 
 // ARM interrupt number for PRU event EVTOUT2
 // this is Host 4 in the PRU intc, which maps to EVTOUT2
-#define irq_number 23
+#define IRQ_NUMBER 23
 
 #define PRU_SYSTEM_EVENT 21
 #define PRU_INTC_CHANNEL 5
@@ -67,6 +67,7 @@ struct rtdm_pruss_irq_context {
 	u32 pru_system_event;
 	u32 pru_intc_channel;
 	u32 pru_intc_host;
+	u32 linux_irq_number;
 };
 
 static int irq_handler(rtdm_irq_t *irq_handle){
@@ -100,12 +101,12 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	u32 pru_intc_host = ctx->pru_intc_channel;
 	u32 pru_system_event = ctx->pru_system_event;
 	ctx->pruintc_io = ioremap(AM33XX_INTC_PHYS_BASE, PRU_INTC_SIZE);
-	// Set polarity of system events
-	iowrite32(0xFFFFFFFF, ctx->pruintc_io + PRU_INTC_SIPR0_REG);
-	iowrite32(0xFFFFFFFF,  ctx->pruintc_io + PRU_INTC_SIPR1_REG);
-	// Set type of system events
-	iowrite32(0x0, ctx->pruintc_io + PRU_INTC_SITR0_REG);
-	iowrite32(0x0, ctx->pruintc_io + PRU_INTC_SITR1_REG);
+	// Set polarity of system events: HIGH is active
+	iowrite32(0xFFFFFFFF, ctx->pruintc_io + PRU_INTC_SIPR0_REG); // TODO: read current and only set relevant bit
+	iowrite32(0xFFFFFFFF,  ctx->pruintc_io + PRU_INTC_SIPR1_REG); // TODO: read current and only set relevant bit
+	// Set type of system events: PULSE
+	iowrite32(0x0, ctx->pruintc_io + PRU_INTC_SITR0_REG); // TODO: read current and only set relevant bit
+	iowrite32(0x0, ctx->pruintc_io + PRU_INTC_SITR1_REG); // TODO: read current and only set relevant bit
 
 	// PRU has 64 system events that are internally mapped
 	// to 10 channels of the PRU's INTC.
@@ -133,16 +134,17 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	//printk(KERN_WARNING "PRU_INTC_HIER_REG: %#x\n", value);
 
 	// 4.4.3.2.1 INTC methodology > Interrupt Processing > Interrupt Enabling
-	iowrite32(pru_system_event, ctx->pruintc_io + PRU_INTC_EISR_REG);
+	// this register is write-only
+	iowrite32(pru_system_event, ctx->pruintc_io + PRU_INTC_EISR_REG); // TODO: disable this in _close() (EICR)
 
 	// enable host interrupt output
-	iowrite32(pru_intc_host, ctx->pruintc_io + PRU_INTC_HIEISR_REG);
+	iowrite32(pru_intc_host, ctx->pruintc_io + PRU_INTC_HIEISR_REG); // TODO: disable this in _close() (HIDISR)
 
 	// Enable system event to trigger the output (not clearly written in the manual)
 	if(pru_system_event < 32)
-		iowrite32((1 << pru_system_event), ctx->pruintc_io + PRU_INTC_ESR0_REG); // TODO: disable this in _close()
+		iowrite32((1 << pru_system_event), ctx->pruintc_io + PRU_INTC_ESR0_REG); // TODO: disable this in _close() (ECR0)
 	else
-		iowrite32((1 << (pru_system_event - 32)), ctx->pruintc_io + PRU_INTC_ESR1_REG); // TODO: disable this in _close()
+		iowrite32((1 << (pru_system_event - 32)), ctx->pruintc_io + PRU_INTC_ESR1_REG); // TODO: disable this in _close() (ECR1)
 
 	// enable Global Enable Register
 	iowrite32(1, ctx->pruintc_io + PRU_INTC_GER_REG);
@@ -152,22 +154,23 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 void init_intc(struct rtdm_pruss_irq_context *ctx){
 	struct device_node *of_node = of_find_node_by_name(NULL, "interrupt-controller");
 	struct irq_domain *intc_domain = irq_find_matching_fwnode(&of_node->fwnode, DOMAIN_BUS_ANY); 
-	ctx->linux_irq = irq_create_mapping(intc_domain, irq_number);
+	ctx->linux_irq = irq_create_mapping(intc_domain, ctx->linux_irq_number);
 	int res = rtdm_irq_request(&ctx->irq_n, ctx->linux_irq, irq_handler, 0, "rtdm_pruss_irq_irq", (void*)ctx);
-	printk(KERN_ALERT "rtdm_pruss_irq linux_irq: %i\n", ctx->linux_irq);
+	printk(KERN_ALERT "rtdm_pruss_irq linux_irq: %i for linux_irq_number: %i\n", ctx->linux_irq, ctx->linux_irq_number);
 	if(res != 0)
 		printk(KERN_ALERT "rtdm interrupt registered: %i FAILED\n", res);
 }
 
+static int called = 0;
 static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
-	static int called = 0;
+	printk(KERN_WARNING "rtdm_pruss_irq_open %d\n", called);
 	ctx->pru_system_event = PRU_SYSTEM_EVENT + called;
 	ctx->pru_intc_channel = PRU_INTC_CHANNEL + called;
 	ctx->pru_intc_host = PRU_INTC_HOST + called;
-	called++;
+	ctx->linux_irq_number = IRQ_NUMBER + called;
 	
-	printk(KERN_WARNING "rtdm_pruss_irq_open %d\n", called);
+	called++;
 
 	init_intc(ctx);
 	init_pru(ctx);
@@ -177,9 +180,10 @@ static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
 }
 
 static void rtdm_pruss_irq_close(struct rtdm_fd *fd){
+	called--;
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
 	// disable the Global Enable Register of the PRU INTC
-	iowrite32(0, ctx->pruintc_io + PRU_INTC_GER_REG); // TODO: only clear the enabled IRQ and do not disable the global
+	iowrite32(0, ctx->pruintc_io + PRU_INTC_GER_REG); // TODO: only clear the enabled IRQ and do not disable the global (unless it's the last one)
 
 	rtdm_irq_free(&ctx->irq_n);
 	rtdm_free(ctx->buf);
@@ -227,7 +231,7 @@ static struct rtdm_driver rtdm_pruss_irq_driver = {
 						    RTDM_CLASS_EXPERIMENTAL,
 						    RTDM_SUBCLASS_GENERIC,
 						    0),
-	.device_flags		= RTDM_NAMED_DEVICE | RTDM_EXCLUSIVE,
+	.device_flags		= RTDM_NAMED_DEVICE,
 	.device_count		= 1,
 	.context_size		= sizeof(struct rtdm_pruss_irq_context),
 	.ops = {
