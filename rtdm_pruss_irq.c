@@ -1,17 +1,9 @@
 #include <linux/module.h>
 #include <rtdm/driver.h>
+#include "rtdm_pruss_irq.h"
 MODULE_LICENSE("GPL");
 
-#define CM_PER 0x44e00000
-#define CM_PER_SIZE 0x3fff
-
-// ARM interrupt number for PRU event EVTOUT2
-// this is Host 4 in the PRU intc, which maps to EVTOUT2
-#define IRQ_NUMBER 23
-
-#define PRU_SYSTEM_EVENT 21
-#define PRU_INTC_CHANNEL 5
-#define PRU_INTC_HOST PRU_INTC_CHANNEL
+#define PRU_ICSS_EVTOUT0 20 // TRM 6.3, table 6-1
 
 u32 PRU_INTC_HMR_REGS[] = {
 	0x800,
@@ -67,7 +59,8 @@ struct rtdm_pruss_irq_context {
 	u32 pru_system_event;
 	u32 pru_intc_channel;
 	u32 pru_intc_host;
-	u32 linux_irq_number;
+	u32 arm_irq_number;
+	u32 mapped;
 };
 
 static int irq_handler(rtdm_irq_t *irq_handle){
@@ -95,8 +88,7 @@ static int irq_handler(rtdm_irq_t *irq_handle){
 	}
 }
 
-void init_pru(struct rtdm_pruss_irq_context *ctx){
-	unsigned int value;
+static void init_pru(struct rtdm_pruss_irq_context *ctx){
 	u32 pru_intc_channel = ctx->pru_intc_channel;
 	u32 pru_intc_host = ctx->pru_intc_channel;
 	u32 pru_system_event = ctx->pru_system_event;
@@ -113,10 +105,6 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	// These are in turn mapped to 10 host channels
 	// which are exported to ARM's INTC.
 
-	// for 16 <= pru_system_event < 32,
-	// we can trigger event pru_system_event from the PRU by doing:
-	// MOV R31.b0, (1 << 5) | (pru_system_event - 16)
-
 	// 4.4.2.5 INTC Basic Programming Model
 	// map system event pru_system_event to interrupt controller channel pru_intc_channel
 	iowrite8(pru_intc_channel, ctx->pruintc_io + PRU_INTC_CMR_REGS[pru_system_event >> 2] + (pru_system_event & 3));
@@ -131,7 +119,6 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 	//enable host interrupt
 	//iowrite32((1 << pru_intc_host), ctx->pruintc_io + PRU_INTC_HIER_REG);
 	//value = ioread32(ctx->pruintc_io + PRU_INTC_HIER_REG);
-	//printk(KERN_WARNING "PRU_INTC_HIER_REG: %#x\n", value);
 
 	// 4.4.3.2.1 INTC methodology > Interrupt Processing > Interrupt Enabling
 	// this register is write-only
@@ -148,40 +135,115 @@ void init_pru(struct rtdm_pruss_irq_context *ctx){
 
 	// enable Global Enable Register
 	iowrite32(1, ctx->pruintc_io + PRU_INTC_GER_REG);
-	value = ioread32(ctx->pruintc_io + PRU_INTC_HIER_REG);
 }
 
-void init_intc(struct rtdm_pruss_irq_context *ctx){
+static int init_intc(struct rtdm_pruss_irq_context *ctx){
+	int res;
 	struct device_node *of_node = of_find_node_by_name(NULL, "interrupt-controller");
 	struct irq_domain *intc_domain = irq_find_matching_fwnode(&of_node->fwnode, DOMAIN_BUS_ANY); 
-	ctx->linux_irq = irq_create_mapping(intc_domain, ctx->linux_irq_number);
-	int res = rtdm_irq_request(&ctx->irq_n, ctx->linux_irq, irq_handler, 0, "rtdm_pruss_irq_irq", (void*)ctx);
-	printk(KERN_ALERT "rtdm_pruss_irq linux_irq: %i for linux_irq_number: %i\n", ctx->linux_irq, ctx->linux_irq_number);
+	ctx->linux_irq = irq_create_mapping(intc_domain, ctx->arm_irq_number);
+	res = rtdm_irq_request(&ctx->irq_n, ctx->linux_irq, irq_handler, 0, "rtdm_pruss_irq_irq", (void*)ctx);
+	printk(KERN_INFO "rtdm_pruss_irq linux_irq: %i for arm_irq_number: %i\n", ctx->linux_irq, ctx->arm_irq_number);
 	if(res != 0)
-		printk(KERN_ALERT "rtdm interrupt registered: %i FAILED\n", res);
+	{
+		printk(KERN_WARNING "rtdm interrupt registered: %i FAILED\n", res);
+		return -1;
+	}
+	return 0;
 }
 
-static int called = 0;
-static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
+static int refcount = 0;
+static int rtdm_pruss_ioctl(struct rtdm_fd* fd, unsigned int request, void __user* arg){
+	int err;
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
-	printk(KERN_WARNING "rtdm_pruss_irq_open %d\n", called);
-	ctx->pru_system_event = PRU_SYSTEM_EVENT + called;
-	ctx->pru_intc_channel = PRU_INTC_CHANNEL + called;
-	ctx->pru_intc_host = PRU_INTC_HOST + called;
-	ctx->linux_irq_number = IRQ_NUMBER + called;
-	
-	called++;
+	struct rtdm_pruss_irq_registration reg;
 
-	init_intc(ctx);
+	if(_IOC_TYPE(request) != RTDM_PRUSS_IRQ_IOC_MAGIC)
+	{
+		printk(KERN_WARNING "Unknown ioctl");
+		return -ENOTTY;
+	}
+	// if user wants to write, check that we can read
+	// from user the appropriate size
+	if(_IOC_DIR(request) & _IOC_WRITE)
+		err = !access_ok(VERIFY_READ, arg, _IOC_SIZE(request));
+	if(err)
+	{
+		printk(KERN_WARNING "ioctl: unable to access argument memory");
+		return -EFAULT;
+	}
+
+	// TODO: guard against device removal while executing this ioctl.
+	// (using spinlocks)
+	switch(request){
+		case RTDM_PRUSS_IRQ_REGISTER_FULL:
+			err = rtdm_copy_from_user(fd, &reg, (struct rtdm_pruss_irq_registration __user*)arg, sizeof(struct rtdm_pruss_irq_registration));
+			if(err)
+			{
+				return -1;
+			}
+			ctx->pru_system_event = reg.pru_system_event;
+			ctx->pru_intc_channel = reg.pru_intc_channel;
+			ctx->pru_intc_host = reg.pru_intc_host;
+			break;
+		case RTDM_PRUSS_IRQ_REGISTER:
+			ctx->pru_system_event = (u32)arg;
+			// apply "default" mapping
+			// (ranges checked below)
+			ctx->pru_intc_channel = ctx->pru_system_event - 16;
+			ctx->pru_intc_host = ctx->pru_intc_channel;
+			break;
+		default:
+			break;
+	}
+	if(
+		ctx->pru_system_event > 64 ||
+		ctx->pru_intc_channel < 2 || ctx->pru_intc_channel > 9 ||
+		ctx->pru_intc_host < 2 || ctx->pru_intc_host > 9
+	)
+	{
+		return -EINVAL;
+	}
+	// -2 because PRUSS INTC 2:9 are mapped to PRU_ICSS_EVTOUT0:PRU_ICSS_EVTOUT7
+	// (channels 0 and 1 cannot be routed to ARM)
+	ctx->arm_irq_number = ctx->pru_intc_channel - 2 + PRU_ICSS_EVTOUT0;
+	printk(KERN_INFO
+		"Registering PRU interrupt:\n"
+		"  PRU ICSS system event: %u\n"
+		"  PRU INTC channel: %u\n"
+		"  PRU INTC host interrupt: %u\n"
+	        "  ARM IRQ number:  %u\n",
+		ctx->pru_system_event,
+		ctx->pru_intc_channel,
+		ctx->pru_intc_host,
+		ctx->arm_irq_number
+	      );
+	if((err = init_intc(ctx)))
+	{
+		printk(KERN_WARNING "Unable to register interrupt\n");
+		return err;
+	}
 	init_pru(ctx);
 	rtdm_event_init(&ctx->event, 0);
+	ctx->mapped = 1;
+	return 0;
+}
+
+static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
+	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
+	printk(KERN_INFO "rtdm_pruss_irq_open %d\n", refcount);
+	memset(ctx, sizeof(*ctx),  0);
+	refcount++;
 	ctx->buf = (int*)rtdm_malloc(4096);
 	return 0;
 }
 
 static void rtdm_pruss_irq_close(struct rtdm_fd *fd){
-	called--;
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
+	refcount--;
+	rtdm_printk("rtdm_pruss_irq close\n");
+	if(!ctx->mapped)
+		return;
 	// disable the Global Enable Register of the PRU INTC
 	iowrite32(0, ctx->pruintc_io + PRU_INTC_GER_REG); // TODO: only clear the enabled IRQ and do not disable the global (unless it's the last one)
 
@@ -190,29 +252,18 @@ static void rtdm_pruss_irq_close(struct rtdm_fd *fd){
 	rtdm_event_pulse(&ctx->event);
 	rtdm_event_destroy(&ctx->event);
 	//irq_dispose_mapping(ctx->linux_irq); // calling this causes a stack trace in dmesg
-	rtdm_printk("rtdm_pruss_irq closed\n");
-}
-
-static ssize_t rtdm_pruss_irq_write(struct rtdm_fd *fd, const void __user *buf, size_t size){
-	// struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
-	// res = rtdm_copy_from_user(fd, ctx->buf, buf, size);
-	// ctx->size = size;
-
-	rtdm_printk(KERN_WARNING "rtdm_pruss_irq:write() Nothing happening\n");
-	return size;
-}
-
-static ssize_t rtdm_pruss_irq_read_nrt(struct rtdm_fd *fd, void __user *buf, size_t size){
-	printk(KERN_ALERT "Trying to read non-realtime. \n");
-	return size;
 }
 
 static ssize_t rtdm_pruss_irq_read(struct rtdm_fd *fd, void __user *buf, size_t size){
 	int ret;
-	int value = 0;
-	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
-
 	nanosecs_rel_t timeout = 100000000;
+	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
+	if(!ctx->mapped)
+	{
+		rtdm_printk(KERN_WARNING "You need to ioctl() before read()\n");
+		return -EFAULT;
+	}
+
 	// wait till event gets signalled or timeout occurs
 	// if the event has been signalled already, will return immediately
 	ret = rtdm_event_timedwait(&ctx->event, timeout, NULL);
@@ -237,12 +288,9 @@ static struct rtdm_driver rtdm_pruss_irq_driver = {
 	.ops = {
 		.open		= rtdm_pruss_irq_open,
 		.close		= rtdm_pruss_irq_close,
-		//.ioctl_rt	= rtdm_basic_ioctl_rt,
-		//.ioctl_nrt	= rtdm_basic_ioctl_nrt,
-		.read_nrt	= rtdm_pruss_irq_read_nrt,
-		.write_nrt	= rtdm_pruss_irq_write,
+		.ioctl_rt	= rtdm_pruss_ioctl,
+		.ioctl_nrt	= rtdm_pruss_ioctl,
 		.read_rt	= rtdm_pruss_irq_read,
-		.write_rt	= rtdm_pruss_irq_write,
 	},
 };
 
