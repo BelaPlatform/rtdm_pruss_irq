@@ -7,6 +7,7 @@
  *
  * The PRUSS INTC is described in (TRM 4.4.2), see e.g.: Figure 4-17
  */
+#include <linux/types.h>
 #include <linux/ioctl.h>
 
 #define RTDM_PRUSS_IRQ_VERSION 1
