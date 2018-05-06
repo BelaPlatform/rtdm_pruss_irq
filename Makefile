@@ -26,7 +26,7 @@ $(MODULE_NAME).ko: $(MODULE_NAME).c
 
 test: $(TEST)
 $(TEST): $(TEST).c $(TEST)_bin.h
-	$(CC) -o $@ $< $(STD_CFLAGS) $(STD_LDFLAGS) -I/root/Bela/include /root/Bela/lib/libprussdrv.a
+	$(CC) -o $@ $< $(STD_CFLAGS) $(STD_LDFLAGS) -lprussdrv
 
 install:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
