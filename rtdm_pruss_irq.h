@@ -17,7 +17,8 @@ struct rtdm_pruss_irq_registration {
 	/**
 	 * valid range: 0:63 (TRM table 4-22)
 	 */
-	__u32 pru_system_event;
+	const __u8* pru_system_events;
+	__u8 pru_system_events_count;
 	/**
 	 * valid range: 0:9 (TRM 4.4.2.3.4)
 	 */
