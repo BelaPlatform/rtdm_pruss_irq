@@ -280,8 +280,11 @@ static int rtdm_pruss_ioctl(struct rtdm_fd* fd, unsigned int request, void __use
 		default:
 			break;
 	}
+	for(n = 0; n < ctx->pru_system_events_count; ++n)
+		if(ctx->pru_system_events[n] > 64)
+			return -EINVAL;
+
 	if(
-		ctx->pru_system_events[0] > 64 || // TODO: check other pru_sytem_events as well
 		ctx->pru_intc_channel > 9 ||
 		ctx->pru_intc_host > 9
 	)
@@ -297,7 +300,7 @@ static int rtdm_pruss_ioctl(struct rtdm_fd* fd, unsigned int request, void __use
 		"  PRU INTC channel: %u\n"
 		"  PRU INTC host interrupt: %u\n"
 		"  ARM IRQ number:  %d\n",
-		ctx->pru_system_events[0], // TODO: check other pru_system_events_as_well
+		ctx->pru_system_events[0], // TODO: print other pru_system_events_as_well
 		ctx->pru_intc_channel,
 		ctx->pru_intc_host,
 		ctx->arm_irq_handle_number
