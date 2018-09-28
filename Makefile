@@ -30,6 +30,7 @@ $(TEST): $(TEST).c $(TEST)_bin.h
 
 install:
 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
+	cp rtdm_pruss_irq.h /usr/include/linux/
 	depmod -a $(UNAME)
 
 clean:
