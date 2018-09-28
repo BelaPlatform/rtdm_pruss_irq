@@ -397,7 +397,7 @@ static struct rtdm_device device = {
 };
 
 static int __init rtdm_pruss_irq_init(void){
-	printk(KERN_WARNING "rtdm_pruss_irq loaded\n");
+	printk(KERN_WARNING "rtdm_pruss_irq version %d loaded\n", RTDM_PRUSS_IRQ_VERSION);
 	return rtdm_dev_register(&device);
 }
 
