@@ -220,7 +220,7 @@ static int allocate_pru_system_events(struct rtdm_pruss_irq_context* ctx)
 	return 0;
 }
 static int rtdm_pruss_ioctl(struct rtdm_fd* fd, unsigned int request, void __user* arg){
-	int err;
+	int err = 0;
 	u32 n;
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
 	struct rtdm_pruss_irq_registration reg;
