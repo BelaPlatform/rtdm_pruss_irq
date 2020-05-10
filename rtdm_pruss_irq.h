@@ -10,7 +10,7 @@
 #include <linux/types.h>
 #include <linux/ioctl.h>
 
-#define RTDM_PRUSS_IRQ_VERSION 1
+#define RTDM_PRUSS_IRQ_VERSION 2
 
 #define RTDM_PRUSS_IRQ_IOC_MAGIC 'p'
 struct rtdm_pruss_irq_registration {
@@ -55,4 +55,8 @@ struct rtdm_pruss_irq_registration {
  */
 #define RTDM_PRUSS_IRQ_REGISTER_FULL _IOW(RTDM_PRUSS_IRQ_IOC_MAGIC, 1, struct rtdm_pruss_irq_registration*)
 
+/**
+ * Set the verbose level (0, 1 or 2)
+ */
+#define RTDM_PRUSS_IRQ_VERBOSE _IOW(RTDM_PRUSS_IRQ_IOC_MAGIC, 2, __u32)
 #endif /* RTDM_PRUSS_IRQ */
