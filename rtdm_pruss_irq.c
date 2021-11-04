@@ -344,7 +344,7 @@ static int rtdm_pruss_irq_ioctl(struct rtdm_fd* fd, unsigned int request, void _
 static int rtdm_pruss_irq_open(struct rtdm_fd *fd, int oflags){
 	struct rtdm_pruss_irq_context *ctx = rtdm_fd_to_private(fd);
 	printk(KERN_INFO "rtdm_pruss_irq_open\n");
-	memset(ctx, sizeof(*ctx),  0);
+	memset(ctx, 0, sizeof(*ctx));
 	return 0;
 }
 
